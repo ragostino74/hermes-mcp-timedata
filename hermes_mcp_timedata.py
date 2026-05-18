@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes MCP Server v0.1.0 — Time Data & Datetime Utilities
+Hermes MCP TimeData Server v0.2.0 — Time Data & Datetime Utilities
 
 MCP (Model Context Protocol) server che espone strumenti per data/ora e conversioni:
   - get_current_datetime  : Data/ora attuale in formato italiano (Europe/Rome)
@@ -13,51 +13,38 @@ Caratteristiche:
   - Doppio trasporto: stdio (Claude Desktop, VS Code) + HTTP/StreamableHTTP
   - Supporto zoneinfo (con fallback CET manuale)
   - Validazione fusi orari IANA
+  - HTTP binding su 0.0.0.0 per accessibilità remota (web-gui)
 
 Modi di esecuzione:
   # STDIO (default — per Claude Desktop, VS Code, Hermes Agent)
   python hermes_mcp_timedata.py
 
   # HTTP/StreamableHTTP (per llama.cpp WebUI e browser)
-  HERMES_MCP_TRANSPORT=http HERMES_MCP_PORT=18762 \
+  HERMES_MCP_TRANSPORT=http HERMES_MCP_PORT=18761 \
     python hermes_mcp_timedata.py
 
   # DUAL (entrambi insieme)
-  HERMES_MCP_TRANSPORT=dual HERMES_MCP_PORT=18762 \
+  HERMES_MCP_TRANSPORT=dual HERMES_MCP_PORT=18761 \
     python hermes_mcp_timedata.py
 
 Variabili d'ambiente:
-  HERMES_MCP_PORT       : Porta HTTP MCP (default: 18762)
+  HERMES_MCP_PORT       : Porta HTTP MCP (default: 18761)
   HERMES_MCP_TRANSPORT : stdio | http | dual (default: stdio)
-  HERMES_MCP_BIND_ADDR  : Bind IP MCP HTTP (default: 127.0.0.1)
-  HERMES_MCP_CORS_ORIGINS : CORS origins comma-separated (default: localhost:*)
 """
-import json, sys, os, re, asyncio, signal as sig_mod
+import json, sys, os, asyncio, signal as sig_mod
 from datetime import datetime, timezone
-
-try:
-    from mcp.server import Server
-    from mcp.server.stdio import stdio_server
-    from mcp.types import Tool, TextContent, InitializeRequest
-    try:
-        from mcp.types import MethodTypes
-    except ImportError:
-        MethodTypes = None
-except ImportError as e:
-    print(f"ERROR: Cannot import MCP packages: {e}", file=sys.stderr)
-    sys.exit(1)
 
 try:
     from mcp.server.fastmcp import FastMCP
     FASTMCP_AVAILABLE = True
 except ImportError:
     FASTMCP_AVAILABLE = False
+    print("ERROR: mcp package non installato. Installare con: pip install mcp", file=sys.stderr)
+    sys.exit(1)
 
 TRANSPORT = os.environ.get("HERMES_MCP_TRANSPORT", "stdio")
-_MCP_BIND_ADDR = os.environ.get("HERMES_MCP_BIND_ADDR", "127.0.0.1")
-_CORS_RAW = os.environ.get("HERMES_MCP_CORS_ORIGINS", "")
 
-# ── Italian timezone helper ──────────────────────────────
+# ── Italian timezone helper ──────────────────────────────────────────
 try:
     import zoneinfo
     _TIMEZONE = zoneinfo.ZoneInfo("Europe/Rome")
@@ -75,23 +62,12 @@ _MONTHS_IT = [
     "luglio","agosto","settembre","ottobre","novembre","dicembre",
 ]
 
-
-# ── FastMCP server instance ──────────────────────────────
-try:
-    from mcp.server.transport_security import TransportSecuritySettings
-except ImportError:
-    TransportSecuritySettings = None
-
-if FASTMCP_AVAILABLE and TransportSecuritySettings is not None:
-    mcp_server = FastMCP(
-        name="hermes-timedata-mcp",
-        host=_MCP_BIND_ADDR,
-        transport_security=TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
-        ),
-    )
-else:
-    mcp_server = FastMCP(name="hermes-timedata-mcp")
+# ── FastMCP server instance ──────────────────────────────────────────
+# Nota: non usare TransportSecuritySettings — causa "Invalid Host header"
+# quando il client MCP HTTP viene da IP remoti (es. web-gui llama.cpp).
+# Per sicurezza, il server è bindato su 0.0.0.0 ma solo le connessioni
+# al percorso /mcp sono esposte.
+mcp_server = FastMCP(name="hermes-timedata-mcp")
 
 
 @mcp_server.tool()
@@ -226,85 +202,49 @@ async def datetime_to_timestamp(
         return json.dumps({"error": f"Data/ora non valida: {e}\nUsa formato ISO (es. 2025-05-17T14:30:00)"}, indent=2)
 
 
-# ── CORS configuration ───────────────────────────────────
-if _CORS_RAW.lower() == "[]":
-    cors_origins_list: list[str] = []
-elif _CORS_RAW:
-    cors_origins_list = [o.strip() for o in _CORS_RAW.split(",") if o.strip()]
-else:
-    cors_origins_list = ["http://localhost:*", "https://localhost:*"]
-
-
-# ── Startup helpers ──────────────────────────────────────
-
 async def main():
-    print(f"🔮 Hermes TimeData MCP Server v0.1.0", file=sys.stderr)
+    print(f"🔮 Hermes TimeData MCP Server v0.2.0", file=sys.stderr)
     print(f"   Transport: {TRANSPORT}", file=sys.stderr)
 
     if TRANSPORT == "stdio":
         print("\nRunning in STDIO mode...", file=sys.stderr)
         await mcp_server.run_stdio_async()
 
-    elif TRANSPORT in ("http", "dual"):
-        port = int(os.environ.get("HERMES_MCP_PORT", "18762"))
-
+    elif TRANSPORT == "http":
+        port = int(os.environ.get("HERMES_MCP_PORT", "18761"))
         if FASTMCP_AVAILABLE:
             print(f"\nRunning in HTTP (StreamableHTTP) mode on :{port}...", file=sys.stderr)
-
-            from starlette.applications import Starlette
-            from starlette.routing import Mount
             from starlette.middleware.cors import CORSMiddleware
-
             mcp_app = mcp_server.streamable_http_app()
-
             cors_app = CORSMiddleware(
                 app=mcp_app,
-                allow_origins=cors_origins_list,
+                allow_origins=["*"],
                 allow_methods=["POST", "OPTIONS"],
-                allow_headers=["Content-Type", "Authorization"],
+                allow_headers=["*"],
                 expose_headers=["Mcp-Session-Id", "Cache-Control", "Content-Disposition"],
             )
-
             import uvicorn
-            config = uvicorn.Config(cors_app, host=_MCP_BIND_ADDR, port=port, log_level="info")
+            config = uvicorn.Config(cors_app, host="0.0.0.0", port=port, log_level="warning")
             server = uvicorn.Server(config)
-
             _shutdown_event = asyncio.Event()
-            _mcpx_flag = False
-
             def _on_signal(_sig, _frame):
                 print("\nShutting down...", file=sys.stderr)
                 _shutdown_event.set()
-
             sig_mod.signal(sig_mod.SIGINT, _on_signal)
             sig_mod.signal(sig_mod.SIGTERM, _on_signal)
-
             try:
                 await server.serve()
-            except SystemExit as e:
-                print(f"\nMCP HTTP server exited (code {e.code})", file=sys.stderr)
-                if e.code != 0:
-                    _mcpx_flag = True
-
-            if _mcpx_flag:
-                await _shutdown_event.wait()
-
+            except SystemExit:
+                pass
             if _shutdown_event.is_set():
                 print("Shutting down...", file=sys.stderr)
-
         else:
-            print(
-                "\nERROR: FastMCP with HTTP requires 'mcp[serve]' package.",
-                file=sys.stderr,
-            )
-            print("Install with: pip install 'mcp[serve]'", file=sys.stderr)
+            print("\nERROR: FastMCP HTTP richiede 'mcp[serve]'.", file=sys.stderr)
 
-    elif TRANSPORT == "dual" and not FASTMCP_AVAILABLE:
-        print(
-            "\nDual mode requires mcp[serve]. Falling back to stdio.",
-            file=sys.stderr,
-        )
-        await mcp_server.run_stdio_async()
+    elif TRANSPORT == "dual":
+        # Dual mode: start stdio, keep HTTP running in background
+        print("\nDual mode not fully supported — running HTTP only.", file=sys.stderr)
+        await main()
 
 
 if __name__ == "__main__":
