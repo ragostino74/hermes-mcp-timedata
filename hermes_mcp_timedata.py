@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes MCP Server v0.1.0 — Time Data & Datetime Utilities
+Hermes MCP Server v0.2.0 — Time Data & Datetime Utilities
 
 MCP (Model Context Protocol) server che espone strumenti per data/ora e conversioni:
   - get_current_datetime  : Data/ora attuale in formato italiano (Europe/Rome)
@@ -87,7 +87,7 @@ if FASTMCP_AVAILABLE and TransportSecuritySettings is not None:
         name="hermes-timedata-mcp",
         host=_MCP_BIND_ADDR,
         transport_security=TransportSecuritySettings(
-            enable_dns_rebinding_protection=True,
+            enable_dns_rebinding_protection=False,
         ),
     )
 else:
@@ -238,7 +238,7 @@ else:
 # ── Startup helpers ──────────────────────────────────────
 
 async def main():
-    print(f"🔮 Hermes TimeData MCP Server v0.1.0", file=sys.stderr)
+    print(f"🔮 Hermes TimeData MCP Server v0.2.0", file=sys.stderr)
     print(f"   Transport: {TRANSPORT}", file=sys.stderr)
 
     if TRANSPORT == "stdio":
