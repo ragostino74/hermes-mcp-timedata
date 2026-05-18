@@ -5,6 +5,23 @@ Tutti i cambiamenti degni di nota in questo progetto saranno documentati in ques
 Il formato è basato su [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-05-18
+
+### Fixed
+- **DNS rebinding protection riabilitata**: `enable_dns_rebinding_protection=True` (era `False`). Configura `HERMES_MCP_ALLOWED_HOSTS` per aggiungere hosts remoti.
+- **CORS configurabile**: Le origini CORS sono ora controllate via `HERMES_MCP_CORS_ORIGINS` (default: `http://localhost:*,https://localhost:*` invece di `*`).
+- **Bind address configurabile**: `HERMES_MCP_BIND_ADDR` ora funziona (default: `127.0.0.1` invece di `0.0.0.0`).
+- **Dual mode**: Risolto loop ricorsivo infinito — stdio e HTTP ora girano concorrentemente con `asyncio.gather()`.
+- **Parametro `format` rinominato**: `format` → `fmt` per evitare shadowing del built-in Python.
+
+### Added
+- **Health check endpoint**: `/health` restituisce JSON con stato, versione e configurazione.
+- **Logging migliorato**: `log_level="info"` (era `warning`), e stampa config all'avvio.
+- **Tipo-safe**: Tipizzazione completa delle funzioni con type hints.
+
+### Changed
+- **Default bind addr**: Cambiato da `0.0.0.0` a `127.0.0.1` per sicurezza (solo localhost).
+
 ## [0.2.1] — 2026-05-18
 
 ### Fixed
