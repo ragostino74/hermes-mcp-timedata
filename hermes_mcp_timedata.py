@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes MCP TimeData Server v0.2.2 — Time Data & Datetime Utilities
+Hermes MCP TimeData Server v0.2.3 — Time Data & Datetime Utilities
 
 MCP (Model Context Protocol) server che espone strumenti per data/ora e conversioni:
   - get_current_datetime  : Data/ora attuale in formato italiano (Europe/Rome)
@@ -33,6 +33,13 @@ Variabili d'ambiente:
                              (default: http://localhost:*,https://localhost:*)
   HERMES_MCP_ALLOWED_HOSTS : Hosts consentiti per Host header check
                              (default: localhost,127.0.0.1,::1)
+
+Cambiamenti in v0.2.3:
+  - CORS allow_headers ristretto da ["*"] a headers specifici MCP
+  - CORS expose_headers ridotto a solo Mcp-Session-Id
+  - Banner/version allineato a v0.2.3
+
+Cambiamenti in v0.2.2:
 """
 import json, sys, os, asyncio, signal as sig_mod
 from datetime import datetime, timezone
@@ -295,7 +302,7 @@ async def health_check(request: Request) -> JSONResponse:
     """Health check endpoint per sistemi di monitoraggio."""
     return JSONResponse({
         "status": "healthy",
-        "version": "0.2.2",
+        "version": "0.2.3",
         "transport": TRANSPORT,
         "bind_addr": BIND_ADDR,
     })
@@ -308,7 +315,7 @@ HEALTH_ROUTES: List[Route] = [
 
 
 async def main() -> None:
-    print(f"🔮 Hermes TimeData MCP Server v0.2.2", file=sys.stderr)
+    print(f"🔮 Hermes TimeData MCP Server v0.2.3", file=sys.stderr)
     print(f"   Transport:    {TRANSPORT}", file=sys.stderr)
     print(f"   Bind addr:    {BIND_ADDR}", file=sys.stderr)
     print(f"   CORS origins: {CORS_ORIGINS}", file=sys.stderr)
@@ -341,12 +348,12 @@ async def main() -> None:
             app=combined_app,
             allow_origins=CORS_ORIGINS,
             allow_methods=["POST", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=[
+            allow_headers=[
+                "Content-Type",
+                "Authorization",
                 "Mcp-Session-Id",
-                "Cache-Control",
-                "Content-Disposition",
             ],
+            expose_headers=["Mcp-Session-Id"],
         )
 
         import uvicorn
@@ -400,12 +407,12 @@ async def main() -> None:
             app=combined_app,
             allow_origins=CORS_ORIGINS,
             allow_methods=["POST", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=[
+            allow_headers=[
+                "Content-Type",
+                "Authorization",
                 "Mcp-Session-Id",
-                "Cache-Control",
-                "Content-Disposition",
             ],
+            expose_headers=["Mcp-Session-Id"],
         )
 
         import uvicorn

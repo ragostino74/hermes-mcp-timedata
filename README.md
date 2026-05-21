@@ -43,7 +43,19 @@ python hermes_mcp_timedata.py
 | `HERMES_MCP_PORT` | `18761` | Porta per la modalità HTTP/StreamableHTTP |
 | `HERMES_MCP_BIND_ADDR` | `127.0.0.1` | Bind IP per il server MCP HTTP (default sicuro: localhost) |
 | `HERMES_MCP_CORS_ORIGINS` | `http://localhost:*,https://localhost:*` | CORS origins, comma-separated. Imposta `[]` per same-origin-only |
-| `HERMES_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1,::1` | Hosts consentiti per Host header check (DNS rebinding protection) |
+|| `HERMES_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1,::1` | Hosts consentiti per Host header check (DNS rebinding protection) |
+
+## Note sulla Sicurezza (v0.2.x)
+
+Il server TimeData è progettato per la sicurezza out-of-the-box:
+
+1. **Nessun SSRF**: il server non effettua richieste HTTP esterne (operate solo su datetime locale)
+2. **DNS rebinding protection**: abilitata di default tramite `TransportSecuritySettings(enable_dns_rebinding_protection=True)` con `allowed_hosts` configurabile
+3. **Bind localhost di default**: ascolta su `127.0.0.1`; usa `HERMES_MCP_BIND_ADDR=0.0.0.0` solo su reti affidabili
+4. **CORS restrittivo**: `allow_headers` ristretto a soli headers MCP (`Content-Type`, `Authorization`, `Mcp-Session-Id`). `allow_credentials=False` per compatibilità browser moderne con wildcard subdomains
+
+### Compatibilità Connessioni Remote (v0.2.x)
+Per connettersi da IP remoti: impostare sia `HERMES_MCP_BIND_ADDR=0.0.0.0` che aggiungere l'IP della LAN a `HERMES_MCP_ALLOWED_HOSTS` (es. `localhost,127.0.0.1,::1,10.0.0.70`).
 
 ## Integrazione con llama.cpp WebUI
 

@@ -5,6 +5,16 @@ Tutti i cambiamenti degni di nota in questo progetto saranno documentati in ques
 Il formato è basato su [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] — 2026-05-21
+
+### Fixed
+- **CORS allow_headers**: ristretto da `["*"]` a headers specifici MCP (`Content-Type`, `Authorization`, `Mcp-Session-Id`). Rimossi header non necessari (`Cache-Control`, `Content-Disposition`).
+- **CORS expose_headers**: ridotto a solo `Mcp-Session-Id`.
+- **Banner/version allineato**: v0.2.3 in docstring, banner print e health endpoint.
+
+### Added
+- **Note sulla sicurezza (README)**: sezione documentante SSRF-safe, DNS rebinding, bind localhost, CORS restrittivo.
+
 ## [0.2.2] — 2026-05-18
 
 ### Fixed
