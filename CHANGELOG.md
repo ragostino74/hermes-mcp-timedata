@@ -5,6 +5,20 @@ Tutti i cambiamenti degni di nota in questo progetto saranno documentati in ques
 Il formato è basato su [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 e questo progetto aderisce a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-05-24
+
+### Fixed
+- **Fix critico**: tutti i tool return type cambiati da `str` a `dict`, rimossi tutti i `json.dumps()` manuali (FastMCP >= 1.27 crashava con `PydanticUserError`).
+- **Signal handling migliorato** in dual mode: stdio e HTTP task vengono cancellati correttamente in fase di shutdown.
+
+### Changed
+- **Duplicazione codice ridotta**: configurazione HTTP server estratta in `_build_http_server()` helper (usata sia da `http` che `dual`).
+- **ZoneInfoNotFoundError**: cattura semplificata (`except KeyError`).
+- **requirements.txt**: pinnato a `mcp[serve]>=1.27`.
+
+### Added
+- **Warning console** quando bind su `0.0.0.0` con DNS rebinding protection attiva.
+
 ## [0.2.3] — 2026-05-21
 
 ### Fixed
