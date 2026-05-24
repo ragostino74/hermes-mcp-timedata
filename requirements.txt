@@ -1,1 +1,1 @@
-mcp[serve]>=1.26
+mcp[serve]>=1.27

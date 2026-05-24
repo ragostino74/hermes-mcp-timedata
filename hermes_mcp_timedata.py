@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes MCP TimeData Server v0.2.3 — Time Data & Datetime Utilities
+Hermes MCP TimeData Server v0.2.4 — Time Data & Datetime Utilities
 
 MCP (Model Context Protocol) server che espone strumenti per data/ora e conversioni:
   - get_current_datetime  : Data/ora attuale in formato italiano (Europe/Rome)
@@ -34,14 +34,20 @@ Variabili d'ambiente:
   HERMES_MCP_ALLOWED_HOSTS : Hosts consentiti per Host header check
                              (default: localhost,127.0.0.1,::1)
 
+Cambiamenti in v0.2.4:
+  - Fix critico: tool return type cambiata da 'str' a 'dict', rimossi json.dumps()
+    (compatibile con FastMCP >= 1.27 — i return str + json.dumps crashano con PydanticUserError)
+  - Signal handling migliorato in dual mode (shutdown pulito di stdio + HTTP)
+  - Duplicazione codice HTTP server ridotta via helper function
+  - ZoneInfoNotFoundError: cattura semplificata (KeyError)
+
 Cambiamenti in v0.2.3:
   - CORS allow_headers ristretto da ["*"] a headers specifici MCP
   - CORS expose_headers ridotto a solo Mcp-Session-Id
   - Banner/version allineato a v0.2.3
 
-Cambiamenti in v0.2.2:
 """
-import json, sys, os, asyncio, signal as sig_mod
+import sys, os, asyncio, signal as sig_mod
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -99,9 +105,6 @@ else:
     ALLOWED_HOSTS = ["localhost", "127.0.0.1", "::1"]
 
 # ── FastMCP server instance ──────────────────────────────────────────
-# DNS rebinding protection is ENABLED by default.
-# Configure allowed hosts via HERMES_MCP_ALLOWED_HOSTS if you need
-# to connect from specific remote addresses.
 mcp_server: FastMCP = FastMCP(
     name="hermes-timedata-mcp",
     transport_security=TransportSecuritySettings(
@@ -112,10 +115,10 @@ mcp_server: FastMCP = FastMCP(
 
 
 @mcp_server.tool()
-async def get_current_datetime() -> str:
+async def get_current_datetime() -> dict:
     """Ottieni la data e ora attuale in formato italiano (Europe/Rome)."""
     now = datetime.now(_TIMEZONE)
-    return json.dumps({
+    return {
         "date": f"{_DAYS_IT[now.weekday()]}, {now.day} {_MONTHS_IT[now.month - 1]} {now.year}",
         "time": now.strftime("%H:%M:%S"),
         "full_datetime": (
@@ -126,14 +129,14 @@ async def get_current_datetime() -> str:
         "iso": now.isoformat(),
         "timestamp": int(now.timestamp()),
         "week_number": now.isocalendar()[1],
-    }, ensure_ascii=False)
+    }
 
 
 @mcp_server.tool()
-async def get_current_datetime_utc() -> str:
+async def get_current_datetime_utc() -> dict:
     """Ottieni la data e ora attuale in UTC."""
     now = datetime.now(timezone.utc)
-    return json.dumps({
+    return {
         "date": f"{_DAYS_IT[now.weekday()]}, {now.day} {_MONTHS_IT[now.month - 1]} {now.year}",
         "time": now.strftime("%H:%M:%S"),
         "full_datetime": (
@@ -144,28 +147,28 @@ async def get_current_datetime_utc() -> str:
         "iso": now.isoformat(),
         "timestamp": int(now.timestamp()),
         "week_number": now.isocalendar()[1],
-    }, ensure_ascii=False)
+    }
 
 
 @mcp_server.tool()
-async def get_current_datetime_tz(timezone_name: str) -> str:
+async def get_current_datetime_tz(timezone_name: str) -> dict:
     """Ottieni la data e ora attuale per un fuso orario IANA specificato
     (es. 'America/New_York', 'Asia/Tokyo')."""
     timezone_name = timezone_name.strip()
     if not timezone_name:
-        return json.dumps({"error": "Fuso orario richiesto"}, indent=2)
+        return {"error": "Fuso orario richiesto"}
     try:
         tz = zoneinfo.ZoneInfo(timezone_name)
-    except (zoneinfo.ZoneInfoNotFoundError, KeyError):
-        return json.dumps({
+    except KeyError:
+        return {
             "error": f"Fuso orario non valido: '{timezone_name}'",
             "hint": (
                 "Usa fusi IANA come 'Europe/London', 'America/New_York', 'Asia/Tokyo'"
             ),
-        }, indent=2)
+        }
 
     now = datetime.now(tz)
-    return json.dumps({
+    return {
         "date": f"{_DAYS_IT[now.weekday()]}, {now.day} {_MONTHS_IT[now.month - 1]} {now.year}",
         "time": now.strftime("%H:%M:%S"),
         "full_datetime": (
@@ -176,21 +179,21 @@ async def get_current_datetime_tz(timezone_name: str) -> str:
         "iso": now.isoformat(),
         "timestamp": int(now.timestamp()),
         "week_number": now.isocalendar()[1],
-    }, ensure_ascii=False)
+    }
 
 
 @mcp_server.tool()
-async def timestamp_to_datetime(unix_timestamp: float) -> str:
+async def timestamp_to_datetime(unix_timestamp: float) -> dict:
     """Converte un Unix timestamp a data/ora leggibile in italiano
     (Europe/Rome)."""
     try:
         ts = float(unix_timestamp)
     except (ValueError, TypeError):
-        return json.dumps({"error": "Timestamp deve essere un numero"}, indent=2)
+        return {"error": "Timestamp deve essere un numero"}
 
     try:
         now = datetime.fromtimestamp(ts, tz=_TIMEZONE)
-        return json.dumps({
+        return {
             "date": (
                 f"{_DAYS_IT[now.weekday()]}, {now.day} "
                 f"{_MONTHS_IT[now.month - 1]} {now.year}"
@@ -205,11 +208,9 @@ async def timestamp_to_datetime(unix_timestamp: float) -> str:
             "iso": now.isoformat(),
             "timestamp": int(ts),
             "utc_iso": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
-        }, ensure_ascii=False)
+        }
     except (OSError, OverflowError, ValueError):
-        return json.dumps(
-            {"error": f"Timestamp non valido: {unix_timestamp}"}, indent=2
-        )
+        return {"error": f"Timestamp non valido: {unix_timestamp}"}
 
 
 @mcp_server.tool()
@@ -217,7 +218,7 @@ async def datetime_to_timestamp(
     date: str = "",
     time_val: str = "",
     fmt: str = "",
-) -> str:
+) -> dict:
     """Converte una data/ora a Unix timestamp.
 
     Accetta date in formato ISO (es. '2025-05-17T14:30:00') oppure
@@ -233,7 +234,7 @@ async def datetime_to_timestamp(
         # Custom format parsing
         try:
             parsed = datetime.strptime(date.strip(), fmt)
-            return json.dumps({
+            return {
                 "date": (
                     f"{_DAYS_IT[parsed.weekday()]}, {parsed.day} "
                     f"{_MONTHS_IT[parsed.month - 1]} {parsed.year}"
@@ -245,16 +246,16 @@ async def datetime_to_timestamp(
                     ).timestamp()
                 ),
                 "iso": parsed.isoformat(),
-            }, ensure_ascii=False)
+            }
         except ValueError as e:
-            return json.dumps({"error": f"Formato non valido: {e}"}, indent=2)
+            return {"error": f"Formato non valido: {e}"}
     else:
-        return json.dumps({
+        return {
             "error": (
                 "Specificare almeno un parametro: 'date' (ISO o custom), "
                 "o 'date' + 'time', con 'format' opzionale"
             ),
-        }, indent=2)
+        }
 
     try:
         # Try ISO format first
@@ -262,7 +263,7 @@ async def datetime_to_timestamp(
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=_TIMEZONE)
         ts = int(dt.timestamp())
-        return json.dumps({
+        return {
             "date": (
                 f"{_DAYS_IT[dt.weekday()]}, {dt.day} "
                 f"{_MONTHS_IT[dt.month - 1]} {dt.year}"
@@ -277,20 +278,17 @@ async def datetime_to_timestamp(
             "iso": dt.isoformat(),
             "timestamp": ts,
             "utc_iso": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(),
-        }, ensure_ascii=False)
+        }
     except (ValueError, TypeError) as e:
-        return json.dumps(
-            {
-                "error": (
-                    f"Data/ora non valida: {e}\n"
-                    "Usa formato ISO (es. 2025-05-17T14:30:00)"
-                ),
-            },
-            indent=2,
-        )
+        return {
+            "error": (
+                f"Data/ora non valida: {e}\n"
+                "Usa formato ISO (es. 2025-05-17T14:30:00)"
+            ),
+        }
 
 
-# ── Starlette / HTTP helpers ─────────────────────────────────────────
+# ── HTTP server helpers ──────────────────────────────────────────────
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -302,7 +300,7 @@ async def health_check(request: Request) -> JSONResponse:
     """Health check endpoint per sistemi di monitoraggio."""
     return JSONResponse({
         "status": "healthy",
-        "version": "0.2.3",
+        "version": "0.2.4",
         "transport": TRANSPORT,
         "bind_addr": BIND_ADDR,
     })
@@ -314,12 +312,57 @@ HEALTH_ROUTES: List[Route] = [
 ]
 
 
+def _build_http_server(bind_addr: str, port: int):
+    """Create and return a configured Uvicorn server for MCP HTTP transport.
+
+    Handles app construction + CORS setup — shared between http and dual modes
+    to avoid code duplication.
+    """
+    mcp_app = mcp_server.streamable_http_app()
+    combined_app = Starlette(
+        routes=[*mcp_app.routes, *HEALTH_ROUTES],
+    )
+    cors_app = CORSMiddleware(
+        app=combined_app,
+        allow_origins=CORS_ORIGINS,
+        allow_methods=["POST", "OPTIONS"],
+        allow_headers=[
+            "Content-Type",
+            "Authorization",
+            "Mcp-Session-Id",
+        ],
+        expose_headers=["Mcp-Session-Id"],
+    )
+
+    import uvicorn  # noqa: F811 — reimport in scope where uvicorn might not be available yet
+
+    config = uvicorn.Config(
+        cors_app,
+        host=bind_addr,
+        port=port,
+        log_level="info",
+    )
+    return uvicorn.Server(config)
+
+
+# ── Main entry point ─────────────────────────────────────────────────
 async def main() -> None:
-    print(f"🔮 Hermes TimeData MCP Server v0.2.3", file=sys.stderr)
+    print(f"🔮 Hermes TimeData MCP Server v0.2.4", file=sys.stderr)
     print(f"   Transport:    {TRANSPORT}", file=sys.stderr)
     print(f"   Bind addr:    {BIND_ADDR}", file=sys.stderr)
     print(f"   CORS origins: {CORS_ORIGINS}", file=sys.stderr)
     print(f"   Allowed hosts: {ALLOWED_HOSTS}", file=sys.stderr)
+
+    if BIND_ADDR == "0.0.0.0":
+        print(
+            "\n⚠️  WARNING: Binding on 0.0.0.0 with DNS rebinding protection enabled.",
+            file=sys.stderr,
+        )
+        print(
+            "   Ensure you trust your network. Add remote IPs to "
+            "HERMES_MCP_ALLOWED_HOSTS (e.g. 'localhost,127.0.0.1,::1,10.0.0.70').",
+            file=sys.stderr,
+        )
 
     if TRANSPORT == "stdio":
         print("\nRunning in STDIO mode...", file=sys.stderr)
@@ -329,7 +372,7 @@ async def main() -> None:
         port = int(os.environ.get("HERMES_MCP_PORT", "18761"))
         if not FASTMCP_AVAILABLE:
             print(
-                "\nERROR: FastMCP HTTP richiede 'mcp[serve]'.", file=sys.stderr
+                "\nERROR: FastMCP HTTP requires 'mcp[serve]'.", file=sys.stderr,
             )
             return
 
@@ -338,57 +381,11 @@ async def main() -> None:
             file=sys.stderr,
         )
 
-        mcp_app = mcp_server.streamable_http_app()
-
-        # Combine MCP routes + health routes, then wrap with CORS
-        combined_app = Starlette(
-            routes=[*mcp_app.routes, *HEALTH_ROUTES],
-        )
-        cors_app = CORSMiddleware(
-            app=combined_app,
-            allow_origins=CORS_ORIGINS,
-            allow_methods=["POST", "OPTIONS"],
-            allow_headers=[
-                "Content-Type",
-                "Authorization",
-                "Mcp-Session-Id",
-            ],
-            expose_headers=["Mcp-Session-Id"],
-        )
-
-        import uvicorn
-
-        config = uvicorn.Config(
-            cors_app,
-            host=BIND_ADDR,
-            port=port,
-            log_level="info",
-        )
-        server = uvicorn.Server(config)
-
-        _shutdown_event = asyncio.Event()
-
-        def _on_signal(_sig: object, _frame: object) -> None:
-            print("\nShutting down...", file=sys.stderr)
-            _shutdown_event.set()
-
-        sig_mod.signal(sig_mod.SIGINT, _on_signal)
-        sig_mod.signal(sig_mod.SIGTERM, _on_signal)
-
-        try:
-            await server.serve()
-        except SystemExit:
-            pass
-
-        if _shutdown_event.is_set():
-            print("Shutting down...", file=sys.stderr)
+        http_server = _build_http_server(BIND_ADDR, port)
+        await http_server.serve()
 
     elif TRANSPORT == "dual":
-        print(
-            "\nRunning in DUAL mode (stdio + HTTP)...",
-            file=sys.stderr,
-        )
-
+        port = int(os.environ.get("HERMES_MCP_PORT", "18761"))
         if not FASTMCP_AVAILABLE:
             print(
                 "\nDual mode requires mcp[serve]. Falling back to stdio.",
@@ -397,39 +394,18 @@ async def main() -> None:
             await mcp_server.run_stdio_async()
             return
 
-        port = int(os.environ.get("HERMES_MCP_PORT", "18761"))
-
-        mcp_app = mcp_server.streamable_http_app()
-        combined_app = Starlette(
-            routes=[*mcp_app.routes, *HEALTH_ROUTES],
-        )
-        cors_app = CORSMiddleware(
-            app=combined_app,
-            allow_origins=CORS_ORIGINS,
-            allow_methods=["POST", "OPTIONS"],
-            allow_headers=[
-                "Content-Type",
-                "Authorization",
-                "Mcp-Session-Id",
-            ],
-            expose_headers=["Mcp-Session-Id"],
+        print(
+            f"\nRunning in DUAL mode (stdio + HTTP on {BIND_ADDR}:{port})...",
+            file=sys.stderr,
         )
 
-        import uvicorn
+        http_server = _build_http_server(BIND_ADDR, port)
 
-        http_config = uvicorn.Config(
-            cors_app,
-            host=BIND_ADDR,
-            port=port,
-            log_level="info",
-        )
-        http_server = uvicorn.Server(http_config)
-
-        _shutdown_event = asyncio.Event()
+        shutdown_event = asyncio.Event()
 
         def _on_signal(_sig: object, _frame: object) -> None:
             print("\nShutting down...", file=sys.stderr)
-            _shutdown_event.set()
+            shutdown_event.set()
 
         sig_mod.signal(sig_mod.SIGINT, _on_signal)
         sig_mod.signal(sig_mod.SIGTERM, _on_signal)
@@ -438,8 +414,12 @@ async def main() -> None:
         stdio_task = asyncio.create_task(mcp_server.run_stdio_async())
         http_task = asyncio.create_task(http_server.serve())
 
-        await asyncio.gather(stdio_task, http_task, return_exceptions=True)
-        print("Shutting down...", file=sys.stderr)
+        try:
+            await asyncio.gather(stdio_task, http_task, return_exceptions=True)
+        finally:
+            stdio_task.cancel()
+            http_task.cancel()
+            print("Shutting down...", file=sys.stderr)
 
     else:
         print(
