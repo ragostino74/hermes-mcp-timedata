@@ -1,15 +1,14 @@
 # Hermes MCP Server — TimeData
 
 MCP (Model Context Protocol) server che espone strumenti per data/ora e conversioni temporali.
-Permette a qualsiasi client MCP di accedere a informazioni temporali con formattazione italiana.
 
 ## Funzionalità
 
 - **get_current_datetime** — Data e ora attuale in italiano (Europe/Rome)
-- **get_current_datetime_utc** — Data e ora attuale in UTC
-- **get_current_datetime_tz** — Data e ora per un fuso orario IANA specificato
-- **timestamp_to_datetime** — Converte Unix timestamp a data/ora leggibile
-- **datetime_to_timestamp** — Converte data/ora a Unix timestamp
+- **get_current_datetime_utc** — Data e ora corrente in UTC
+- **get_current_datetime_tz(timezone_name)** — Ora per un fuso IANA
+- **timestamp_to_datetime(unix_timestamp)** — Converte timestamp a data/ora italiana
+- **datetime_to_timestamp(date, time, format)** — Converte data/ora a timestamp
 
 ## Requisiti
 
@@ -19,84 +18,47 @@ Permette a qualsiasi client MCP di accedere a informazioni temporali con formatt
 ## Installazione
 
 ```bash
-# Crea un ambiente virtuale
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Installa le dipendenze
+python3 -m venv .venv && source .venv/bin/activate
 pip install mcp[serve]
-
-# Avvia in modalità stdio (per Claude Desktop, VS Code, ecc.)
-python hermes_mcp_timedata.py
-
-# Oppure in modalità HTTP/StreamableHTTP (per llama.cpp WebUI)
-export HERMES_MCP_TRANSPORT=http
-export HERMES_MCP_PORT=18761
-python hermes_mcp_timedata.py
 ```
 
-## Configurazione Environment Variables
+## Esecuzione
+
+```bash
+# STDIO — per Hermes Agent, Claude Desktop, VS Code
+python hermes_mcp_timedata.py
+
+# HTTP/StreamableHTTP — per llama.cpp WebUI e browser
+HERMES_MCP_TRANSPORT=http HERMES_MCP_PORT=18761 python hermes_mcp_timedata.py
+```
+
+## Variabili d'ambiente
 
 | Variabile | Default | Descrizione |
-|-----------|---------|-------------|
-| `HERMES_MCP_TRANSPORT` | `stdio` | Modalità di trasporto: `stdio`, `http`, o `dual` |
-| `HERMES_MCP_PORT` | `18761` | Porta per la modalità HTTP/StreamableHTTP |
-| `HERMES_MCP_BIND_ADDR` | `127.0.0.1` | Bind IP per il server MCP HTTP (default sicuro: localhost) |
-| `HERMES_MCP_CORS_ORIGINS` | `http://localhost:*,https://localhost:*` | CORS origins, comma-separated. Imposta `[]` per same-origin-only |
-|| `HERMES_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1,::1` | Hosts consentiti per Host header check (DNS rebinding protection) |
-
-## Note sulla Sicurezza (v0.2.x)
-
-Il server TimeData è progettato per la sicurezza out-of-the-box:
-
-1. **Nessun SSRF**: il server non effettua richieste HTTP esterne (operate solo su datetime locale)
-2. **DNS rebinding protection**: abilitata di default tramite `TransportSecuritySettings(enable_dns_rebinding_protection=True)` con `allowed_hosts` configurabile
-3. **Bind localhost di default**: ascolta su `127.0.0.1`; usa `HERMES_MCP_BIND_ADDR=0.0.0.0` solo su reti affidabili
-4. **CORS restrittivo**: `allow_headers` ristretto a soli headers MCP (`Content-Type`, `Authorization`, `Mcp-Session-Id`). `allow_credentials=False` per compatibilità browser moderne con wildcard subdomains
-
-### Compatibilità Connessioni Remote (v0.2.x)
-Per connettersi da IP remoti: impostare sia `HERMES_MCP_BIND_ADDR=0.0.0.0` che aggiungere l'IP della LAN a `HERMES_MCP_ALLOWED_HOSTS` (es. `localhost,127.0.0.1,::1,10.0.0.70`).
+|---|---|---|
+| `HERMES_MCP_TRANSPORT` | `stdio` | Modalità: `stdio`, `http`, o `dual` |
+| `HERMES_MCP_PORT` | `18761` | Porta HTTP per StreamableHTTP |
+| `HERMES_MCP_BIND_ADDR` | `0.0.0.0` | IP di bind (usa `127.0.0.1` in produzione) |
+| `HERMES_MCP_CORS_ORIGINS` | *(vuoto)* | CORS origins, comma-separated. `[]` per same-origin |
+| `HERMES_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1,::1` | Host consentiti (DNS rebinding protection) |
 
 ## Integrazione con llama.cpp WebUI
 
-1. Apri la WebUI in browser
-2. Vai alla sezione **MCP Servers**
-3. Aggiungi un nuovo server con:
-   - **URL**: `http://localhost:18761/mcp` (o l'IP della tua macchina)
+1. Avvia il server in modalità HTTP sulla macchina che ospita i tools:
+   ```bash
+   HERMES_MCP_TRANSPORT=http HERMES_MCP_PORT=18761 \
+     HERMES_MCP_CORS_ORIGINS="*" \
+     python hermes_mcp_timedata.py
+   ```
+
+2. Nella WebUI di llama.cpp vai su **MCP Servers** → aggiungi:
+   - **URL**: `http://<IP_MACCHINA>:18761/mcp`
    - **Transport**: `streamable_http`
-4. Il server dovrebbe connettersi e mostrare i 5 tools disponibili
 
-## Integrazione con altri client MCP
+Il server gestisce automaticamente l'header `mcp-protocol-version` (non standard MCP) inviato da llama.cpp, e il CORS è configurato per accettare richieste cross-origin dal browser.
 
-Lo script supporta anche la modalità **stdio** per:
-- **Claude Desktop** — aggiungi al config JSON
-- **VS Code** — estensioni MCP
-- Qualsiasi altro client che supporti il protocollo MCP via stdio
+## Note sulla sicurezza
 
-## Strumenti Dettagliati
-
-### get_current_datetime
-
-Restituisce data/ora corrente in formato italiano (Europe/Rome).
-
-### get_current_datetime_utc
-
-Restituisce data/ora corrente in UTC.
-
-### get_current_datetime_tz(timezone_name)
-
-Restituisce data/ora corrente per un fuso orario IANA.
-
-Esempio: `America/New_York`, `Asia/Tokyo`, `Europe/London`
-
-### timestamp_to_datetime(unix_timestamp)
-
-Converte un Unix timestamp a data/ora leggibile in italiano (Europe/Rome).
-
-### datetime_to_timestamp(date, time, format)
-
-Converte una data/ora a Unix timestamp. Supporta formati ISO e custom.
-
-## Licenza
-
-MIT License — vedi file [LICENSE](LICENSE).
+- Nessun SSRF (opera solo su datetime locale)
+- DNS rebinding protection: disabilitata di default; usa `HERMES_MCP_ALLOWED_HOSTS` se la riattivi
+- Bind `0.0.0.0` di default — usa `127.0.0.1` su reti non affidabili

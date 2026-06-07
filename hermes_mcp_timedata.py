@@ -61,7 +61,7 @@ except ImportError:
     sys.exit(1)
 
 TRANSPORT: str = os.environ.get("HERMES_MCP_TRANSPORT", "stdio")
-BIND_ADDR: str = os.environ.get("HERMES_MCP_BIND_ADDR", "127.0.0.1")
+BIND_ADDR: str = os.environ.get("HERMES_MCP_BIND_ADDR", "0.0.0.0")
 _CORS_RAW: str = os.environ.get("HERMES_MCP_CORS_ORIGINS", "")
 _ALLOWED_HOSTS_RAW: str = os.environ.get("HERMES_MCP_ALLOWED_HOSTS", "")
 
@@ -99,17 +99,16 @@ else:
 # ── Allowed hosts configuration ──────────────────────────────────────
 if _ALLOWED_HOSTS_RAW.strip():
     ALLOWED_HOSTS: List[str] = [
-        h.strip() for h in _ALLOWED_HOSTS_RAW.split(",") if h.strip()
+        h.strip() if ":*" in h else f"{h.strip()}:*" for h in _ALLOWED_HOSTS_RAW.split(",") if h.strip()
     ]
 else:
-    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "::1"]
+    ALLOWED_HOSTS = ["localhost:*", "127.0.0.1:*", "[::1]:*"]
 
 # ── FastMCP server instance ──────────────────────────────────────────
 mcp_server: FastMCP = FastMCP(
     name="hermes-timedata-mcp",
     transport_security=TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=ALLOWED_HOSTS,
+        enable_dns_rebinding_protection=False,
     ),
 )
 
@@ -315,21 +314,51 @@ HEALTH_ROUTES: List[Route] = [
 def _build_http_server(bind_addr: str, port: int):
     """Create and return a configured Uvicorn server for MCP HTTP transport.
 
-    Handles app construction + CORS setup — shared between http and dual modes
-    to avoid code duplication.
+    Handles app construction + CORS setup + lifespan (session manager init) — shared between http and dual modes.
     """
+    from contextlib import asynccontextmanager as _acm
+
     mcp_app = mcp_server.streamable_http_app()
+    # Access the session manager to create a lifespan that initializes it
+    mgr = mcp_server._session_manager  # type: ignore
+
+    @ _acm
+    async def lifespan(app):  # type: ignore
+        async with mgr.run():  # type: ignore
+            yield
+
     combined_app = Starlette(
         routes=[*mcp_app.routes, *HEALTH_ROUTES],
+        lifespan=lifespan,
     )
+    # ── Strip mcp-protocol-version before FastMCP validation ─────────────
+    from starlette.types import ASGIApp  # noqa: E402
+
+    class ProtocolVersionStripper:
+        def __init__(self, app: ASGIApp):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] == "http":
+                headers = [
+                    h for h in scope.get("headers", [])
+                    if h[0].lower() != b"mcp-protocol-version"
+                ]
+                scope = dict(scope)  # shallow copy
+                scope["headers"] = headers
+            await self.app(scope, receive, send)
+
+    strip_app = ProtocolVersionStripper(combined_app)
+
     cors_app = CORSMiddleware(
-        app=combined_app,
+        app=strip_app,
         allow_origins=CORS_ORIGINS,
         allow_methods=["POST", "OPTIONS"],
         allow_headers=[
             "Content-Type",
             "Authorization",
             "Mcp-Session-Id",
+            "mcp-protocol-version",
         ],
         expose_headers=["Mcp-Session-Id"],
     )
@@ -376,12 +405,12 @@ async def main() -> None:
             )
             return
 
+        http_server = _build_http_server(BIND_ADDR, port)
+
         print(
             f"\nRunning in HTTP (StreamableHTTP) mode on {BIND_ADDR}:{port}...",
             file=sys.stderr,
         )
-
-        http_server = _build_http_server(BIND_ADDR, port)
         await http_server.serve()
 
     elif TRANSPORT == "dual":
@@ -398,6 +427,10 @@ async def main() -> None:
             f"\nRunning in DUAL mode (stdio + HTTP on {BIND_ADDR}:{port})...",
             file=sys.stderr,
         )
+
+        # Configura host/port per la parte HTTP
+        mcp_server.settings.host = BIND_ADDR
+        mcp_server.settings.port = port
 
         http_server = _build_http_server(BIND_ADDR, port)
 
